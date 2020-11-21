@@ -167,13 +167,20 @@ end
 ## Line search
 =#
 mutable struct Line_Search  <: DescentMethod
+	#=
+	TODO
+	=#
 end
 function init!(D::Line_Search, x, gf)
+	#=
+	TODO
+	=#
     return D
 end
 function step!(D::Line_Search, f, gf, x, gx, Hx)
-	g = Hx \ gx
-	xk=x-g
+	#=
+	TODO
+	=#
 	return xk, gf(xk)
 end
 
