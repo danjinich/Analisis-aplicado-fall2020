@@ -3,7 +3,7 @@ using LinearAlgebra
 mutable struct proyecto_final
     #Variables necesarias
     f::Function             #Funcion a minimizar
-	gf::Function 			#Derivada de f
+    gf::Function 	    #Derivada de f
     x0::Vector{Float64}     #Valor inicial
     tol::Float64            #Tolerancia
     maxit::Int64            #Maximo numero de iteraciones
