@@ -1,50 +1,55 @@
 using LinearAlgebra
+using CSV
+using DataFrames
 
-mutable struct proyecto_final
-    #Variables necesarias
+struct proyecto_final
+    # Variables necesarias
     f::Function             #Funcion a minimizar
-    gf::Function 	    #Derivada de f
+	gf::Function 			#Derivada de f
     x0::Vector{Float64}     #Valor inicial
     tol::Float64            #Tolerancia
-    maxit::Int64            #Maximo numero de iteraciones
+    maxit::Number           #Maximo numero de iteraciones
     met::String             #Metodo que se va a usar para minimizar
     res::Vector{Float64}    #Valor minimizado
-
+	pasos::Array{Union{Array{Float64,1}, Nothing}}	#Puntos por los que paso el algoritmo
     #Constructor
     function proyecto_final(f::Function, x0::Array; tol::Float64=1e-4,
-        maxit::Int64=10000, met::String="NEWT-H", a=1.0, gf=NaN)
-
+        maxit::Number=1e6, met::String="NEWT-H", a=1.0, gf=NaN, c1=1e-4,
+		c2=0.9, p=2.0)
         # Se hace el metodo seleccionado
         if met=="BFGS"
-            des=BFGS(NaN)
+			#Creo que deberia de incluir c1,c2 y p
+            des=BFGS(NaN, c1, c2, p)
         elseif met=="NEWT-H"
             des=Newton_H(a)
         elseif met=="NEWT"
+			#Creo que deberia de incluir c1,c2 y p
             des=Newton()
         elseif met=="LINE"
-            des=Line_Search()
-        elseif met=="C-GRAD"
-            des=ConjugateGradient(NaN,NaN)
-		elseif met=="GRAD"
-			des=GradientDescent(a)
+			#Creo que deberia de incluir c1,c2 y p
+            des=Line_Search(c1, c2, p) #TODO
         else
             # Si no es un metodo valido manda un error
             error(string(met,": no es un metodo valido\n",
                         "Los metodos validos son: ", ["BFGS","NEWT-H","NEWT",
-						"LINE", "C-GRAD", "GRAD"]))
+						"LINE"]))
         end
 
-		res=descent(f, x0, des; tol=tol, maxit=maxit, Gf=gf)
+		res, p=descent(f, x0, des; tol=tol, maxit=maxit, Gf=gf)
         # Construye el struct
 		if isnan(gf)
-        	new(f, x -> grad(f,x), x0, tol, maxit, met, res)
+        	new(f, x -> grad(f,x), x0, tol, maxit, met, res, p)
 		else
-			new(f, gf, x0, tol, maxit, met, res)
+			new(f, gf, x0, tol, maxit, met, res, p)
 		end
     end
 end
 
 
+################################################################################
+#################### Declaracion de tipos de ###################################
+########################## Decenso #############################################
+################################################################################
 abstract type DescentMethod end
 
 #=
@@ -52,6 +57,9 @@ abstract type DescentMethod end
 =#
 mutable struct BFGS  <: DescentMethod
     Q
+	c1
+	c2
+	p
 end
 function init!(D::BFGS, x, gf)
     m = length(x)
@@ -59,15 +67,16 @@ function init!(D::BFGS, x, gf)
     return D
 end
 function step!(D::BFGS, f, gf, x, gx, hx)
-    Q, g = D.Q, gx
-    xk = line_search(f, x, -Q*g)
+    Q = D.Q
+    xk = line_step_size(f, x, -Q*gx, D) #TODO
     gk = gf(xk)
     d = xk - x
-    y = gk - g
+    y = gk - gx
     Q[:] = Q - (d*y'*Q + Q*y*d')/(d'*y) +
         (1 + (y'*Q*y)/(d'*y))[1]*(d*d')/(d'*y)
     return xk, gk
 end
+
 
 #=
 ## Metodo de Newton
@@ -80,42 +89,6 @@ end
 function step!(D::Newton, f, gf, x, gx, Hx)
 	g = Hx \ gx
 	xk=x-g
-	return xk, gf(xk)
-end
-
-#=
-## Gradiente
-=#
-
-struct GradientDescent <: DescentMethod
-	a
-end
-function init!(D::GradientDescent, x, gf)
-    return D
-end
-function step!(D::Line_Search, f, gf, x, gx, Hx)
-	xk=x-D.a*g
-	return xk, gf(xk)
-end
-
-#=
-## Gradiente conjugada
-=#
-mutable struct ConjugateGradient <: DescentMethod
-	d
-	g
-end
-function init!(M::ConjugateGradient, x, gf)
-	M.g = gf(x, gf)
-	M.d = -M.g
-	return M
-end
-function step!(M::ConjugateGradient, f, gf, x, gx, Hx)
-	d, g = M.d, M.g
-	b = max(0, dot(gx, gx-g)/(g⋅g))
-	dk = -gx + b*d
-	xk = line_search(f, x, dk)
-	M.d, M.g = dk, gx
 	return xk, gf(xk)
 end
 
@@ -167,26 +140,102 @@ end
 ## Line search
 =#
 mutable struct Line_Search  <: DescentMethod
-	#=
-	TODO
-	=#
+	c1
+	c2
+	p
 end
 function init!(D::Line_Search, x, gf)
-	#=
-	TODO
-	=#
     return D
 end
 function step!(D::Line_Search, f, gf, x, gx, Hx)
-	#=
-	TODO
-	=#
+	#println(gx, grad(f,x))
+	xk=line_step_size(f, x, -gx, D)
+	#println(xk,"\n")
+	#sleep(1)
 	return xk, gf(xk)
+end
+
+function line_step_size(f, x, d, des::DescentMethod)
+	c1=des.c1; c2=des.c2; p=des.p
+	g = al -> f(x + al*d)
+	#dg = al -> derivate(g, al)
+	#gdg(a)= g(a),dg(a)
+	al = minimize(g)
+	if isnan(al)
+		println(x)
+	end
+	#println(al, -d, x)
+
+	return x + al*d
+end
+
+function minimize(f; c1=1e-4,c2=0.9,p=2)
+	a_0=0.0; a_imin=a_0; a_i=1e-3; a_max=65536.0
+	i=0
+	while a_i<a_max
+		if (f(a_i)>f(0)+c1*a_i*derivate(f,0)) || (f(a_i)>=f(a_imin) && i>0)
+			return zoom(a_imin, a_i, f, c1, c2)
+		end
+
+		if abs(derivate(f,a_i))<=-c2*derivate(f,0)
+			return a_i
+		end
+
+		if derivate(f,a_i)>=0
+			return zoom(a_i, a_imin, f, c1, c2)
+		end
+
+		a_imin=a_i
+		a_i *= p
+		i+=1
+	end
+	return 1
+end
+
+function zoom(al, ah, f, c1, c2)
+
+	ak=NaN
+
+	for i in 0:10
+		if al < ah
+			ak=interpolate(al, ah, f)
+		else
+			ak=interpolate(ah, al, f)
+		end
+
+		if isnan(ak)
+			println(String("\n",i,"    aiuda"))
+		end
+		if (f(ak)>f(0)+c1*ak*derivate(f,0)) || (f(ak) > f(al))
+			ah=ak
+		else
+
+			if abs(derivate(f,ak)) <= -c2* derivate(f,0)
+				return ak
+			end
+
+			if derivate(f, ak) * (ah-al)>=0
+				ah=al
+			end
+
+			al=ak
+
+		end
+	end
+	return ak
 end
 
 
 
+function interpolate(a1, a2, f)
+	return a1+(a2-a1)/2
+end
 
+
+################################################################################
+####################### Funciones general de ###################################
+############################### Decenso ########################################
+################################################################################
 function descent(f, x0, D::DescentMethod; tol=1e-8, maxit=1e6, Gf=NaN)
 	if isnan(Gf)
 		gf(x)=grad(f,x) #La derivada de f
@@ -196,20 +245,31 @@ function descent(f, x0, D::DescentMethod; tol=1e-8, maxit=1e6, Gf=NaN)
 	opt=false #Cambia a true cuando se encuentra una solucion optima
 	D=init!(D,x0,gf) #inicializa el metodo de descenso
 	x=copy(x0) #Para no modificar x0
-	gx=gf(x); Hx=Hess(f,x)
-	for i in 1:maxit
-		x, gx=step!(D,f,gf,x, gx, Hx)) #Se da un paso considerando el metodo de descenso
+	gx=gf(x); Hx=hess(f,x); it=0
+	pasos=Array{Union{Array{Float64,1}, Nothing}}(nothing,trunc(Int, maxit)+1)
+	for i in 1:trunc(Int, maxit)
+		pasos[i]=x
+		x, gx=step!(D,f,gf,x, gx, Hx) #Se da un paso considerando el metodo de descenso
 		Hx=hess(f,x)
 		if check_optimality(gx,Hx;tol=tol)
-			it=i; opt=true; break
+			it=i; break
+		end
+		if i%10000==0
+			print(string(i,"...\t", x))
+		end
+		if isnan(x[1])
+			println(i)
+			return 0
 		end
 	end
-	if opt
+	if it!=0
+		pasos[it+1]=x
 		println(string("Se encontro la solucion optima en ", it, " iteraciones"))
 	else
+		pasos[trunc(Int,maxit)+1]=x
 		println("No se encontro la solucion optima, aumente el numero de iteraciones o aumente la tolerancia")
 	end
-	return x
+	return x, pasos
 end
 
 
@@ -245,6 +305,9 @@ function grad(f::Function, x0::Array; h::Float64=1e-20)::Array{Float64,1}
     end
     return res
 end
+function derivate(f, x; h=1e-20)
+	return imag(f(x+h*im))/h
+end
 
 function hess(f::Function, x0::Array; h::Float64=1e-7)::Array{Float64, 2}
 	#Calcula la hessiana de una funcion en un vector, usando paso complejo y paso centrado
@@ -265,7 +328,7 @@ function hess(f::Function, x0::Array; h::Float64=1e-7)::Array{Float64, 2}
 	    		H[i,j] = imag(u1-u2)/(2*h2) #Se extrae la diferencia de la parte imaginaria y se divide entre 2*h^2
 	    		H[j,i]=H[i,j] #Ya que es simetrica la matriz
     		end #for
-   	 end # for
+   	end # for
     return H
 end
 
@@ -285,3 +348,89 @@ end
 function rosenbrock(x0::Array; a::Number=1.0, b::Number=100.0)::Number
 	return (a-x0[1])^2+b*(x0[2]-x0[1]^2)^2
 end
+
+function revisar(x0::Array, a::Number, b::Number; met="NEWT-H", tol::Float64=1e-10, maxit::Int=10000)
+	f(x)=(a-x[1])^2+b*(x[2]-x[1]^2)^2
+	println("El minimo real es:\t\tf([",a,",",a^2,"])=0")
+	p= proyecto_final(f, x0; met=met, tol=tol, maxit=maxit)
+	x=p.res
+	println("El minimo que se encontro es:\tf([", x[1], ",", x[2], "])=", f(x), "\n\n")
+	println("El error absoluto en x es:\t",abs(x[1]-a))
+	println("El error relativo en x es:\t",abs((x[1]-a)/a),"\n")
+	println("El error absoluto en y es:\t",abs(x[2]-a^2))
+	println("El error relativo en y es:\t",abs((x[2]-a^2)/a^2))
+	return p
+end
+#revisar([rand(1:10),rand(1:100)], rand(1:10), rand(1:1000); tol=1e-10, maxit=10000, met="NEWT-H")
+
+################################################################################
+############################# Funcion de las ###################################
+################################# camaras ######################################
+################################################################################
+
+function costo_est(x0,df)
+	esti=20
+	n=convert(Int,length(x0)/2)
+	indx=Int.(ceil.(n*rand(esti)))
+	i1=findfirst(x->imag(x)!=0, x)
+	if i1!=nothing
+		indx[1]=i1
+	end
+	indx=cat(indx,indx.+n, dims=1)
+	x1=x0[indx]
+
+	res=0
+	Threads.@threads for i in 1:esti
+		res+=costo_camara(x1[i], x1[i+esti], x0, df, indx[i])
+	end
+
+	return res
+end
+
+function costo(x0, df)
+	n=convert(Int,length(x0)/2)
+	thr=Threads.nthreads()
+	res=zeros(thr)
+	paso=convert(Int,floor(n/thr))
+	Threads.@threads for i in 1:thr
+		for j in ((i-1)*paso+1):(i*paso)
+			res[i]+=costo_camara(x0[j], x0[j+n], x0, df, j)
+		end
+	end
+	return sum(res)
+end
+function costo_camara(lat, long, x0, df, j)
+	res=0
+	n=convert(Int,length(x0)/2)
+	for i in 1:n
+		if i!=j
+			res+= 1/((lat-x0[i])^2+(long-x0[i+n])^2)
+		end
+	end
+	m=size(df)[1]
+	for i in 1:m
+		res+= (lat-df.lat[i])^2+(long-df.long[i])^2
+	end
+	return res
+end
+
+
+function rand_geo_array(mina, maxa, mino, maxo, s)
+	lat=(maxa-mina)*rand(s).+mina
+	lon=(maxo-mino)*rand(s).+mino
+	return cat(lat,lon, dims=1)
+end
+
+function mejores_camaras(dir, n; tol::Float64=1e-4,
+	maxit::Number=1e6, met::String="NEWT-H", a=1.0, gf=NaN, c1=1e-4,
+	c2=0.9, p=2.0)
+
+	df = CSV.read(dir, DataFrame)
+	x0=rand_geo_array(minimum(df.lat),maximum(df.lat),minimum(df.long),maximum(df.long), n)
+
+	f(x)=costo_est(x,df)
+
+	return proyecto_final(f, x0; tol=tol,maxit=maxit, met=met, a=a, gf=gf, c1=c1,c2=c2, p=p)
+end
+
+#mejores_camaras("/home/danjf/Documents/crime_data.csv", 2000; maxit=100000, met="NEWT")
