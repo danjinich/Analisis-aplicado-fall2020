@@ -3,7 +3,7 @@ El proyecto final está escrito en Julia. A continuación se explicarán concept
 
 En julia no existen clases pero si structs (muy parecidas a las de c). Usamos structs normales y mutables para crear un “paquete” que podamos llamar desde otros archivos y aprovechar sus métodos de manera eficiente. 
 
-Nuestro código está estructurado de la siguiente forma: se definió una struct general llamada proyecto_final para manejar structs mutables contenidas dentro de ella. Esto nos permite llamar a la struct general con el archivo precompilado y usar los métodos de las structs mutables
+Nuestro código está estructurado de la siguiente forma: se definió una struct general llamada proyecto_final para poder optimizar sobre una funcion dada con un punto inicial dado. Este struct crea una otra struct del tipo abstracto `DescentMethod`, y del tipo especifico dado que se usa para optimizar. Cada struct del tipo `DescentMethod` tiene una función asignada `init!` y `step!`, estas funciones las usa una función que se llama `descenso` para optimizar.
 
 Para poder correrlo hay que seguir las siguientes instrucciones:
 1. Correr en la terminal `julia`
