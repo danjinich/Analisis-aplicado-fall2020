@@ -389,16 +389,16 @@ function costo_camaras(x, x0)
 		for i in 1:m
 			if i!=j
 				c = ((x[j]-x[i])^2+(x[j+m]-x[i+m])^2)
-				if sqrt(real(c)^2 + imag(c)^2) <  0.01
-					res += 10000
+				if real(c) <  1e-16    #Cota de distancia minima entre camaras
+					res += 1000
 				else
-					res += 1/c
+					res += 1/real(c)
 				end
 			end
 		end
 	end
 	for i in 1:n       #n crimenes x0
-		for j in 1:m #m camaras x,y
+		for j in 1:m   #m camaras x
 			res+= (x[j]-x0[i])^2+(x[j+m]-x0[i+n])^2
 		end
 	end
@@ -421,9 +421,23 @@ function mejores_camaras(dir, n; tol::Float64=1e-4,
 	#y0=rand_geo_array(minimum(df.lat),maximum(df.lat),minimum(df.long),maximum(df.long), 10000)
 	x = convert(Array{Float64,1},df.lat)
 	y = convert(Array{Float64,1},df.long)
+
+	xmin = minimum(x)
+	xmax = maximum(x)
+	ymin = minimum(y)
+	ymax = maximum(y)
+
+	#pasamos todo al intervalo [0,1]
+	for i in 1:length(x)
+	    x[i] = (1/(xmax - xmin))*(x[i] - xmin)
+	    y[i] = (1/(ymax - ymin))*(y[i] - ymin)
+	end
+
+
 	y0 = cat(x[1:200],y[1:200],dims = 1)
 	x = zeros(2*n)
-	#scatter(y0[1:50],y0[51:100])
+	gr()
+	#Plots.plot(y0[1:50],y0[51:100])
 	#y0 = [0,0,1,1,0,1,0,1]
 	f(x)=costo_camaras(x,y0);
 
@@ -432,9 +446,13 @@ end
 
 
 result= mejores_camaras("/home/fran/Documents/Aplicado/alumnos/danjinich/proyecto_final/crime_data.csv", 10, maxit=100000, met="BFGS")
-
-
-
+Plots.scatter!(result[1][1:4],result[1][5:8])
+Plots.scatter(result[2][1:200],result[2][201:400])
+plt = Plots.scatter!(result[1][1:10],result[1][11:20], marker = :s )
+Plots.savefig(plt,"200-10-3aParam.png")
+#Plots.scatter!(result[2][1:4],result[2][5:8])
 
 
 #rand_geo_array(1, 2, 3, 4, 5)
+
+Plots.save
